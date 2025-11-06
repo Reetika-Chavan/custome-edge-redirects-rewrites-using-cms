@@ -14,7 +14,7 @@ async function fetchEntries(contentType) {
 
   if (!apiKey || !deliveryToken) {
     throw new Error(
-      "Missing Contentstack configuration. Please set CONTENTSTACK_API_KEY and CONTENTSTACK_DELIVERY_TOKEN environment variables."
+      "❌ Missing Contentstack configuration. Please set CONTENTSTACK_API_KEY and CONTENTSTACK_DELIVERY_TOKEN environment variables."
     );
   }
 
@@ -29,49 +29,55 @@ async function fetchEntries(contentType) {
     const result = await Query.toJSON().find();
     return result[0] || [];
   } catch (error) {
-    console.error(
-      `❌ Error fetching entries from content type "${contentType}":`,
-      error
-    );
+    console.error(`❌ Error fetching entries from "${contentType}":`, error);
     throw error;
   }
 }
 
-/**
- * Fetches redirect and rewrite rules from Contentstack
- * Supports separate content types for redirects and rewrites
- * @returns {Promise<Object>} Object with redirectRules and rewriteRules arrays
- */
+
 export async function fetchRules() {
-  const redirectCT = process.env.REDIRECT_CT || "redirects";
-  const rewriteCT = process.env.REWRITE_CT || "rewrites";
+  const redirectCT = process.env.REDIRECT_CT || "redirect";
+  const rewriteCT = process.env.REWRITE_CT || "rewrite";
 
   console.log("🚀 Fetching redirect and rewrite rules from Contentstack...");
-  console.log(`   - Redirect content type: ${redirectCT}`);
-  console.log(`   - Rewrite content type: ${rewriteCT}`);
+  console.log(`   - Redirect CT: ${redirectCT}`);
+  console.log(`   - Rewrite CT: ${rewriteCT}`);
 
-  // Fetch both content types in parallel
   const [redirectEntries, rewriteEntries] = await Promise.all([
-    fetchEntries(redirectCT).catch(() => []), // Return empty array on error
-    fetchEntries(rewriteCT).catch(() => []), // Return empty array on error
+    fetchEntries(redirectCT).catch(() => []),
+    fetchEntries(rewriteCT).catch(() => []),
   ]);
 
-  // Transform redirect entries
+  //Redirect Entries
   const redirectRules = redirectEntries.map((entry) => ({
-    from: entry.url_from || entry.source || entry.from || entry.old_url,
-    to: entry.url_to || entry.destination || entry.to || entry.new_url,
-    type: entry.type || entry.status_code || 301, // Default to 301 (permanent redirect)
+    from: entry.source, 
+    to: entry.destination, 
+    type: entry.statuscode || 301, 
+    headers:
+      entry.response?.headers?.header_pairs?.reduce((acc, pair) => {
+        if (pair.key && pair.value) acc[pair.key] = pair.value;
+        return acc;
+      }, {}) || {}, 
   }));
 
-  // Transform rewrite entries
+  // Rewrite Entries
   const rewriteRules = rewriteEntries.map((entry) => ({
-    from: entry.source_path || entry.source || entry.from || entry.old_url,
-    to:
-      entry.destination_path || entry.destination || entry.to || entry.new_url,
+    from: entry.source, 
+    to: entry.destination || "/", 
+    requestHeaders:
+      entry.request?.headers?.header_pairs?.reduce((acc, pair) => {
+        if (pair.key && pair.value) acc[pair.key] = pair.value;
+        return acc;
+      }, {}) || {},
+    responseHeaders:
+      entry.response?.headers?.header_pairs?.reduce((acc, pair) => {
+        if (pair.key && pair.value) acc[pair.key] = pair.value;
+        return acc;
+      }, {}) || {},
   }));
 
   console.log(
-    `✅ Fetched ${redirectRules.length} redirects and ${rewriteRules.length} rewrites`
+    `✅ Successfully fetched ${redirectRules.length} redirects and ${rewriteRules.length} rewrites`
   );
 
   return { redirectRules, rewriteRules };

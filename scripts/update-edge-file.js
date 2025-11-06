@@ -29,8 +29,8 @@ export async function updateEdgeFile() {
  * Edge function to apply redirects and rewrites
  * Rules are fetched from Contentstack and injected at build/update time
  */
-export default async function middleware(req, context) {
-  const url = new URL(req.url);
+export default async function handler(request) {
+  const url = new URL(request.url);
   const pathname = url.pathname;
 
   // Redirects (fetched from Contentstack)
@@ -54,11 +54,15 @@ export default async function middleware(req, context) {
 
     const statusCode = typeof redirect.type === "number" ? redirect.type : 301;
 
+    // Merge custom headers with Location header
+    const headers = new Headers({
+      Location: destination,
+      ...redirect.headers,
+    });
+
     return new Response(null, {
       status: statusCode,
-      headers: {
-        Location: destination,
-      },
+      headers: headers,
     });
   }
 
@@ -75,18 +79,35 @@ export default async function middleware(req, context) {
       ? rewrite.to
       : \`\${url.origin}\${rewrite.to}\`;
 
-    // For rewrite, fetch the destination and return it
-    const response = await fetch(destination, {
-      method: req.method,
-      headers: req.headers,
-      body: req.body,
+    // Merge request headers with custom headers
+    const requestHeaders = new Headers(request.headers);
+    Object.entries(rewrite.requestHeaders || {}).forEach(([key, value]) => {
+      requestHeaders.set(key, value);
     });
 
-    return response;
+    // For rewrite, fetch the destination and return it
+    const response = await fetch(destination, {
+      method: request.method,
+      headers: requestHeaders,
+      body: request.body,
+    });
+
+    // Apply response headers if specified
+    const responseHeaders = new Headers(response.headers);
+    Object.entries(rewrite.responseHeaders || {}).forEach(([key, value]) => {
+      responseHeaders.set(key, value);
+    });
+
+    // Return response with updated headers
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: responseHeaders,
+    });
   }
 
-  // No match found, continue with normal request
-  return context.next();
+  // No match found, forward request to origin (Contentstack Launch pattern)
+  return fetch(request);
 }
 
 // Simple pattern matching (supports * wildcard)

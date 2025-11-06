@@ -6,53 +6,85 @@
  * Edge function to apply redirects and rewrites
  * Rules are fetched from Contentstack and injected at build/update time
  */
-export default async function middleware(req, context) {
-  const url = new URL(req.url);
+export default async function handler(request) {
+  const url = new URL(request.url);
   const pathname = url.pathname;
 
-  // Dynamic rules (injected by script)
-  // PLACEHOLDER_RULES
+  // Redirects (fetched from Contentstack)
+  const redirects = [];
 
-  // Apply redirects and rewrites
-  for (const rule of rules) {
-    const isMatch =
-      pathname === rule.from ||
-      pathname.startsWith(rule.from + "/") ||
-      matchPattern(pathname, rule.from);
+  // Rewrites (fetched from Contentstack)
+  const rewrites = [];
 
-    if (isMatch) {
-      if (rule.type === "redirect") {
-        const destination = rule.to.startsWith("http")
-          ? rule.to
-          : `${url.origin}${rule.to}`;
+  // Apply redirects first
+  const redirect = redirects.find(
+    (r) =>
+      pathname === r.from ||
+      pathname.startsWith(r.from + "/") ||
+      matchPattern(pathname, r.from)
+  );
 
-        const statusCode = rule.statusCode || (rule.permanent ? 301 : 307);
+  if (redirect) {
+    const destination = redirect.to.startsWith("http")
+      ? redirect.to
+      : `${url.origin}${redirect.to}`;
 
-        return new Response(null, {
-          status: statusCode,
-          headers: {
-            Location: destination,
-          },
-        });
-      } else if (rule.type === "rewrite") {
-        const destination = rule.to.startsWith("http")
-          ? rule.to
-          : `${url.origin}${rule.to}`;
+    const statusCode = typeof redirect.type === "number" ? redirect.type : 301;
 
-        // For rewrite, fetch the destination and return it
-        const response = await fetch(destination, {
-          method: req.method,
-          headers: req.headers,
-          body: req.body,
-        });
+    // Merge custom headers with Location header
+    const headers = new Headers({
+      Location: destination,
+      ...redirect.headers,
+    });
 
-        return response;
-      }
-    }
+    return new Response(null, {
+      status: statusCode,
+      headers: headers,
+    });
   }
 
-  // No match found, continue with normal request
-  return context.next();
+  // Apply rewrites
+  const rewrite = rewrites.find(
+    (r) =>
+      pathname === r.from ||
+      pathname.startsWith(r.from + "/") ||
+      matchPattern(pathname, r.from)
+  );
+
+  if (rewrite) {
+    const destination = rewrite.to.startsWith("http")
+      ? rewrite.to
+      : `${url.origin}${rewrite.to}`;
+
+    // Merge request headers with custom headers
+    const requestHeaders = new Headers(request.headers);
+    Object.entries(rewrite.requestHeaders || {}).forEach(([key, value]) => {
+      requestHeaders.set(key, value);
+    });
+
+    // For rewrite, fetch the destination and return it
+    const response = await fetch(destination, {
+      method: request.method,
+      headers: requestHeaders,
+      body: request.body,
+    });
+
+    // Apply response headers if specified
+    const responseHeaders = new Headers(response.headers);
+    Object.entries(rewrite.responseHeaders || {}).forEach(([key, value]) => {
+      responseHeaders.set(key, value);
+    });
+
+    // Return response with updated headers
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: responseHeaders,
+    });
+  }
+
+  // No match found, forward request to origin (Contentstack Launch pattern)
+  return fetch(request);
 }
 
 // Simple pattern matching (supports * wildcard)
