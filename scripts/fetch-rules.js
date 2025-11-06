@@ -1,4 +1,5 @@
-import * as contentstack from "contentstack";
+// Import Contentstack SDK - handle both ESM and CJS patterns
+let contentstack;
 
 /**
  * Fetches entries from a specific Contentstack content type
@@ -19,7 +20,34 @@ async function fetchEntries(contentType) {
   }
 
   try {
-    const Stack = contentstack.Stack({
+    // Lazy load contentstack module - handle ES module import
+    if (!contentstack) {
+      const contentstackModule = await import("contentstack");
+      // Contentstack SDK v3 exports - try different patterns
+      if (contentstackModule.default) {
+        contentstack = contentstackModule.default;
+      } else if (contentstackModule.Stack) {
+        // If Stack is a named export
+        contentstack = { Stack: contentstackModule.Stack };
+      } else {
+        // Fallback to the module itself
+        contentstack = contentstackModule;
+      }
+    }
+
+    // Access Stack function - handle different export patterns
+    const StackFn = contentstack.Stack || contentstack.default?.Stack;
+
+    if (!StackFn || typeof StackFn !== "function") {
+      throw new Error(
+        `Contentstack.Stack is not available. Module structure: ${JSON.stringify(
+          Object.keys(contentstack)
+        )}`
+      );
+    }
+
+    // Use Contentstack SDK to create Stack instance
+    const Stack = StackFn({
       api_key: apiKey,
       delivery_token: deliveryToken,
       environment: environment,
@@ -33,7 +61,6 @@ async function fetchEntries(contentType) {
     throw error;
   }
 }
-
 
 export async function fetchRules() {
   const redirectCT = process.env.REDIRECT_CT || "redirect";
@@ -50,20 +77,20 @@ export async function fetchRules() {
 
   //Redirect Entries
   const redirectRules = redirectEntries.map((entry) => ({
-    from: entry.source, 
-    to: entry.destination, 
-    type: entry.statuscode || 301, 
+    from: entry.source,
+    to: entry.destination,
+    type: entry.statuscode || 301,
     headers:
       entry.response?.headers?.header_pairs?.reduce((acc, pair) => {
         if (pair.key && pair.value) acc[pair.key] = pair.value;
         return acc;
-      }, {}) || {}, 
+      }, {}) || {},
   }));
 
   // Rewrite Entries
   const rewriteRules = rewriteEntries.map((entry) => ({
-    from: entry.source, 
-    to: entry.destination || "/", 
+    from: entry.source,
+    to: entry.destination || "/",
     requestHeaders:
       entry.request?.headers?.header_pairs?.reduce((acc, pair) => {
         if (pair.key && pair.value) acc[pair.key] = pair.value;
