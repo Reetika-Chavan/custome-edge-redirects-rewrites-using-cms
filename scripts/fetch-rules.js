@@ -1,4 +1,3 @@
-// Import Contentstack SDK - handle both ESM and CJS patterns
 let contentstack;
 
 /**
@@ -7,30 +6,54 @@ let contentstack;
  * @returns {Promise<Array>} Array of entries
  */
 async function fetchEntries(contentType) {
-  const apiKey = process.env.CONTENTSTACK_API_KEY;
+  // Try both prefixed and non-prefixed environment variables for compatibility
+  const apiKey =
+    process.env.CONTENTSTACK_API_KEY ||
+    process.env.NEXT_PUBLIC_CONTENTSTACK_API_KEY;
   const deliveryToken =
     process.env.CONTENTSTACK_DELIVERY_TOKEN ||
-    process.env.CONTENTSTACK_MANAGEMENT_TOKEN;
-  const environment = process.env.CONTENTSTACK_ENVIRONMENT || "production";
+    process.env.NEXT_PUBLIC_CONTENTSTACK_DELIVERY_TOKEN ||
+    process.env.CONTENTSTACK_MANAGEMENT_TOKEN ||
+    process.env.NEXT_PUBLIC_CONTENTSTACK_MANAGEMENT_TOKEN;
+  const environment =
+    process.env.CONTENTSTACK_ENVIRONMENT ||
+    process.env.NEXT_PUBLIC_CONTENTSTACK_ENVIRONMENT ||
+    "development";
 
   if (!apiKey || !deliveryToken) {
+    const missing = [];
+    if (!apiKey) {
+      missing.push("CONTENTSTACK_API_KEY or NEXT_PUBLIC_CONTENTSTACK_API_KEY");
+    }
+    if (!deliveryToken) {
+      missing.push(
+        "CONTENTSTACK_DELIVERY_TOKEN or NEXT_PUBLIC_CONTENTSTACK_DELIVERY_TOKEN (or MANAGEMENT_TOKEN variants)"
+      );
+    }
     throw new Error(
-      "❌ Missing Contentstack configuration. Please set CONTENTSTACK_API_KEY and CONTENTSTACK_DELIVERY_TOKEN environment variables."
+      `❌ Missing Contentstack configuration. Please set the following environment variables: ${missing.join(
+        ", "
+      )}`
     );
   }
 
+  // Log configuration status (without exposing secrets)
+  console.log(
+    `📋 Contentstack configuration: API Key: ${
+      apiKey ? "✓" : "✗"
+    }, Delivery Token: ${
+      deliveryToken ? "✓" : "✗"
+    }, Environment: ${environment}`
+  );
+
   try {
-    // Lazy load contentstack module - handle ES module import
     if (!contentstack) {
       const contentstackModule = await import("contentstack");
-      // Contentstack SDK v3 exports - try different patterns
       if (contentstackModule.default) {
         contentstack = contentstackModule.default;
       } else if (contentstackModule.Stack) {
-        // If Stack is a named export
         contentstack = { Stack: contentstackModule.Stack };
       } else {
-        // Fallback to the module itself
         contentstack = contentstackModule;
       }
     }
