@@ -81,23 +81,46 @@ async function fetchEntries(contentType) {
 
   try {
     if (!contentstack) {
-      // Import Contentstack SDK - match the exact pattern from lib/contentstack.ts
-      // Use import * as contentstack to match the working pattern
+      // Import Contentstack SDK - use dynamic import
       const contentstackModule = await import("contentstack");
-      contentstack = contentstackModule;
+
+      // The module might export Stack directly or via default
+      // Try to find Stack in various locations
+      if (contentstackModule.Stack) {
+        // Stack is directly on the module
+        contentstack = { Stack: contentstackModule.Stack };
+      } else if (contentstackModule.default) {
+        // Check if default has Stack
+        if (contentstackModule.default.Stack) {
+          contentstack = contentstackModule.default;
+        } else if (typeof contentstackModule.default === "function") {
+          // Default itself might be Stack
+          contentstack = { Stack: contentstackModule.default };
+        } else {
+          // Default might be the contentstack namespace
+          contentstack = contentstackModule.default;
+        }
+      } else {
+        // Fallback to the module itself
+        contentstack = contentstackModule;
+      }
     }
 
-    // Access Stack - match lib/contentstack.ts pattern: contentstack.Stack({...})
-    if (!contentstack.Stack) {
+    // Access Stack - should now be at contentstack.Stack
+    const StackFn = contentstack.Stack;
+
+    if (!StackFn) {
+      // Log available keys for debugging
+      const availableKeys = Object.keys(contentstack);
       throw new Error(
-        `Contentstack.Stack is not available. Module structure: ${JSON.stringify(
-          Object.keys(contentstack)
-        )}`
+        `Contentstack.Stack is not available. Available keys: ${JSON.stringify(
+          availableKeys
+        )}. ` +
+          `Try checking: contentstack.default?.Stack or contentstack.default`
       );
     }
 
     // Use Contentstack SDK to create Stack instance
-    // Match the exact pattern from lib/contentstack.ts: contentstack.Stack({...})
     // Wrap in try-catch to handle "Cannot call a class as a function" error
     let Stack;
     const stackConfig = {
@@ -108,14 +131,31 @@ async function fetchEntries(contentType) {
 
     try {
       // Try calling as function first (matches lib/contentstack.ts)
-      Stack = contentstack.Stack(stackConfig);
+      if (typeof StackFn === "function") {
+        Stack = StackFn(stackConfig);
+      } else if (StackFn.Stack && typeof StackFn.Stack === "function") {
+        // If Stack is nested, try that
+        Stack = StackFn.Stack(stackConfig);
+      } else {
+        throw new Error("StackFn is not a callable function");
+      }
     } catch (stackError) {
       // If it's a class, use constructor pattern
       if (
         stackError.message?.includes("class") ||
-        stackError.message?.includes("Cannot call a class as a function")
+        stackError.message?.includes("Cannot call a class as a function") ||
+        stackError.message?.includes("is not a callable")
       ) {
-        Stack = new contentstack.Stack(stackConfig);
+        try {
+          Stack = new StackFn(stackConfig);
+        } catch (constructorError) {
+          // If new also fails, try accessing Stack property
+          if (StackFn.Stack) {
+            Stack = new StackFn.Stack(stackConfig);
+          } else {
+            throw constructorError;
+          }
+        }
       } else {
         // Re-throw if it's a different error
         throw stackError;
