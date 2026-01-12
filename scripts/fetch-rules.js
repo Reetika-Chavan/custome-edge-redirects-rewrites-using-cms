@@ -81,20 +81,21 @@ async function fetchEntries(contentType) {
 
   try {
     if (!contentstack) {
+      // Import Contentstack SDK - match the pattern from lib/contentstack.ts
+      // Use import * as to match the working pattern
       const contentstackModule = await import("contentstack");
-      if (contentstackModule.default) {
+      // Handle both ESM and CJS export patterns
+      if (contentstackModule.default && contentstackModule.default.Stack) {
         contentstack = contentstackModule.default;
-      } else if (contentstackModule.Stack) {
-        contentstack = { Stack: contentstackModule.Stack };
       } else {
         contentstack = contentstackModule;
       }
     }
 
-    // Access Stack function - handle different export patterns
-    const StackFn = contentstack.Stack || contentstack.default?.Stack;
+    // Access Stack function - should be available as contentstack.Stack
+    const StackFn = contentstack.Stack;
 
-    if (!StackFn || typeof StackFn !== "function") {
+    if (!StackFn) {
       throw new Error(
         `Contentstack.Stack is not available. Module structure: ${JSON.stringify(
           Object.keys(contentstack)
@@ -103,11 +104,33 @@ async function fetchEntries(contentType) {
     }
 
     // Use Contentstack SDK to create Stack instance
-    const Stack = StackFn({
-      api_key: apiKey,
-      delivery_token: deliveryToken,
-      environment: environment,
-    });
+    // Try calling as function first, if that fails try as constructor
+    let Stack;
+    try {
+      if (typeof StackFn === "function") {
+        Stack = StackFn({
+          api_key: apiKey,
+          delivery_token: deliveryToken,
+          environment: environment,
+        });
+      } else {
+        throw new Error("StackFn is not a function");
+      }
+    } catch (initError) {
+      // If calling as function fails, try as constructor
+      if (
+        initError.message?.includes("class") ||
+        initError.message?.includes("Cannot call")
+      ) {
+        Stack = new StackFn({
+          api_key: apiKey,
+          delivery_token: deliveryToken,
+          environment: environment,
+        });
+      } else {
+        throw initError;
+      }
+    }
 
     // Set custom host if provided (for non-production environments)
     if (host) {
@@ -161,16 +184,11 @@ async function fetchEntries(contentType) {
 
 export async function fetchRules() {
   const redirectCT = process.env.REDIRECT_CT || "redirect";
-  const rewriteCT = process.env.REWRITE_CT || "rewrite";
 
-  console.log("🚀 Fetching redirect and rewrite rules from Contentstack...");
+  console.log("🚀 Fetching redirect rules from Contentstack...");
   console.log(`   - Redirect CT: ${redirectCT}`);
-  console.log(`   - Rewrite CT: ${rewriteCT}`);
 
-  const [redirectEntries, rewriteEntries] = await Promise.all([
-    fetchEntries(redirectCT).catch(() => []),
-    fetchEntries(rewriteCT).catch(() => []),
-  ]);
+  const redirectEntries = await fetchEntries(redirectCT).catch(() => []);
 
   //Redirect Entries
   const redirectRules = redirectEntries.map((entry) => ({
@@ -184,25 +202,7 @@ export async function fetchRules() {
       }, {}) || {},
   }));
 
-  // Rewrite Entries
-  const rewriteRules = rewriteEntries.map((entry) => ({
-    from: entry.source,
-    to: entry.destination || "/",
-    requestHeaders:
-      entry.request?.headers?.header_pairs?.reduce((acc, pair) => {
-        if (pair.key && pair.value) acc[pair.key] = pair.value;
-        return acc;
-      }, {}) || {},
-    responseHeaders:
-      entry.response?.headers?.header_pairs?.reduce((acc, pair) => {
-        if (pair.key && pair.value) acc[pair.key] = pair.value;
-        return acc;
-      }, {}) || {},
-  }));
+  console.log(`✅ Successfully fetched ${redirectRules.length} redirects`);
 
-  console.log(
-    `✅ Successfully fetched ${redirectRules.length} redirects and ${rewriteRules.length} rewrites`
-  );
-
-  return { redirectRules, rewriteRules };
+  return { redirectRules };
 }

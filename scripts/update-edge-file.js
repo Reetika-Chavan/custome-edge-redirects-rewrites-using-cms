@@ -9,7 +9,7 @@ import { fetchRules } from "./fetch-rules.js";
 export async function updateEdgeFile() {
   try {
     // Fetch rules from Contentstack
-    const { redirectRules, rewriteRules } = await fetchRules();
+    const { redirectRules } = await fetchRules();
 
     const edgeFile = path.join(process.cwd(), "functions", "[proxy].edge.js");
 
@@ -26,7 +26,7 @@ export async function updateEdgeFile() {
 // Generated at: ${timestamp}
 
 /**
- * Edge function to apply redirects and rewrites
+ * Edge function to apply redirects
  * Rules are fetched from Contentstack and injected at build/update time
  */
 export default async function handler(request) {
@@ -36,10 +36,7 @@ export default async function handler(request) {
   // Redirects (fetched from Contentstack)
   const redirects = ${JSON.stringify(redirectRules, null, 2)};
 
-  // Rewrites (fetched from Contentstack)
-  const rewrites = ${JSON.stringify(rewriteRules, null, 2)};
-
-  // Apply redirects first
+  // Apply redirects
   const redirect = redirects.find(
     (r) =>
       pathname === r.from ||
@@ -66,46 +63,6 @@ export default async function handler(request) {
     });
   }
 
-  // Apply rewrites
-  const rewrite = rewrites.find(
-    (r) =>
-      pathname === r.from ||
-      pathname.startsWith(r.from + "/") ||
-      matchPattern(pathname, r.from)
-  );
-
-  if (rewrite) {
-    const destination = rewrite.to.startsWith("http")
-      ? rewrite.to
-      : \`\${url.origin}\${rewrite.to}\`;
-
-    // Merge request headers with custom headers
-    const requestHeaders = new Headers(request.headers);
-    Object.entries(rewrite.requestHeaders || {}).forEach(([key, value]) => {
-      requestHeaders.set(key, value);
-    });
-
-    // For rewrite, fetch the destination and return it
-    const response = await fetch(destination, {
-      method: request.method,
-      headers: requestHeaders,
-      body: request.body,
-    });
-
-    // Apply response headers if specified
-    const responseHeaders = new Headers(response.headers);
-    Object.entries(rewrite.responseHeaders || {}).forEach(([key, value]) => {
-      responseHeaders.set(key, value);
-    });
-
-    // Return response with updated headers
-    return new Response(response.body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers: responseHeaders,
-    });
-  }
-
   // No match found, forward request to origin (Contentstack Launch pattern)
   return fetch(request);
 }
@@ -127,9 +84,8 @@ function matchPattern(pathname, pattern) {
     // Write the updated file
     fs.writeFileSync(edgeFile, edgeCode, "utf-8");
 
-    console.log(`✅ [proxy].edge.js updated with redirects & rewrites`);
+    console.log(`✅ [proxy].edge.js updated with redirects`);
     console.log(`   - ${redirectRules.length} redirects`);
-    console.log(`   - ${rewriteRules.length} rewrites`);
   } catch (error) {
     console.error("❌ Error updating edge file:", error);
     throw error;
