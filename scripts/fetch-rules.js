@@ -1,7 +1,13 @@
 /**
- * Fetch redirect rules from Contentstack
- * Used during build time to generate Edge redirects
+ * Fetch redirect/rewrite rules from Contentstack
+ * Used during build time to generate Edge redirects/rewrites
  */
+
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+
+// Use require for contentstack since it's a CommonJS module
+const contentstack = require("contentstack");
 
 async function fetchEntries(contentType) {
   const apiKey =
@@ -15,7 +21,7 @@ async function fetchEntries(contentType) {
   const environment =
     process.env.CONTENTSTACK_ENVIRONMENT ||
     process.env.NEXT_PUBLIC_CONTENTSTACK_ENVIRONMENT ||
-    "devlopment";
+    "development";
 
   const host =
     process.env.CONTENTSTACK_APP_HOST ||
@@ -36,42 +42,8 @@ async function fetchEntries(contentType) {
   );
 
   try {
-    // Import Contentstack SDK - use dynamic import
-    // The module exports Stack, but the structure depends on how it's imported
-    const contentstackModule = await import("contentstack");
-
-    // Try to find Stack in different locations
-    // Pattern 1: contentstackModule.Stack (named export)
-    // Pattern 2: contentstackModule.default.Stack (default export has Stack)
-    // Pattern 3: contentstackModule.default is Stack itself
-    let StackFn;
-
-    if (contentstackModule.Stack) {
-      StackFn = contentstackModule.Stack;
-    } else if (contentstackModule.default?.Stack) {
-      StackFn = contentstackModule.default.Stack;
-    } else if (
-      contentstackModule.default &&
-      typeof contentstackModule.default === "object"
-    ) {
-      // If default is an object, check if it has Stack
-      StackFn = contentstackModule.default.Stack;
-    }
-
-    if (!StackFn || typeof StackFn !== "function") {
-      const availableKeys = Object.keys(contentstackModule);
-      const defaultKeys = contentstackModule.default
-        ? Object.keys(contentstackModule.default)
-        : [];
-      throw new Error(
-        `Contentstack.Stack not found as a function. ` +
-          `Module keys: ${availableKeys.join(", ")}. ` +
-          `Default keys: ${defaultKeys.join(", ")}`
-      );
-    }
-
-    // Call Stack as a function (not constructor) - matches lib/contentstack.ts pattern
-    const Stack = StackFn({
+    // Initialize Stack using the contentstack instance
+    const Stack = contentstack.Stack({
       api_key: apiKey,
       delivery_token: deliveryToken,
       environment,
@@ -100,26 +72,91 @@ async function fetchEntries(contentType) {
   }
 }
 
-export async function fetchRules() {
-  const redirectCT = process.env.REDIRECT_CT || "redirect";
-
-  console.log("🚀 Fetching redirect rules from Contentstack...");
-  console.log(`   - Redirect Content Type: ${redirectCT}`);
-
-  const entries = await fetchEntries(redirectCT);
-
-  const redirectRules = entries.map((entry) => ({
+/**
+ * Parse redirect entries from Contentstack
+ * Expected fields in content type: source, destination, statuscode, response.headers
+ */
+function parseRedirectEntry(entry) {
+  return {
     from: entry.source,
     to: entry.destination,
-    type: entry.statuscode || 301,
+    type: entry.statuscode || entry.status_code || 301,
     headers:
       entry.response?.headers?.header_pairs?.reduce((acc, pair) => {
         if (pair.key && pair.value) acc[pair.key] = pair.value;
         return acc;
+      }, {}) ||
+      entry.headers?.reduce((acc, pair) => {
+        if (pair.key && pair.value) acc[pair.key] = pair.value;
+        return acc;
+      }, {}) ||
+      {},
+  };
+}
+
+/**
+ * Parse rewrite entries from Contentstack
+ * Expected fields: source, destination, request_headers, response_headers
+ */
+function parseRewriteEntry(entry) {
+  return {
+    from: entry.source,
+    to: entry.destination,
+    requestHeaders:
+      entry.request_headers?.reduce((acc, pair) => {
+        if (pair.key && pair.value) acc[pair.key] = pair.value;
+        return acc;
       }, {}) || {},
-  }));
+    responseHeaders:
+      entry.response_headers?.reduce((acc, pair) => {
+        if (pair.key && pair.value) acc[pair.key] = pair.value;
+        return acc;
+      }, {}) || {},
+  };
+}
 
-  console.log(`✅ Successfully fetched ${redirectRules.length} redirects`);
+/**
+ * Main function to fetch all rules from Contentstack
+ * Fetches both redirects and rewrites based on content type configuration
+ */
+export async function fetchRules() {
+  const redirectCT = process.env.REDIRECT_CT || "redirect";
+  const rewriteCT = process.env.REWRITE_CT || "rewrite";
 
-  return { redirectRules };
+  console.log("🚀 Fetching redirect/rewrite rules from Contentstack...");
+  console.log(`   - Redirect Content Type: ${redirectCT}`);
+  console.log(`   - Rewrite Content Type: ${rewriteCT}`);
+
+  let redirectRules = [];
+  let rewriteRules = [];
+
+  // Fetch redirects
+  try {
+    const redirectEntries = await fetchEntries(redirectCT);
+    redirectRules = redirectEntries
+      .filter((entry) => entry.source && entry.destination)
+      .map(parseRedirectEntry);
+    console.log(`✅ Successfully fetched ${redirectRules.length} redirects`);
+  } catch (error) {
+    console.warn(
+      `⚠️ Could not fetch redirects from "${redirectCT}":`,
+      error.message
+    );
+  }
+
+  // Fetch rewrites
+  try {
+    const rewriteEntries = await fetchEntries(rewriteCT);
+    rewriteRules = rewriteEntries
+      .filter((entry) => entry.source && entry.destination)
+      .map(parseRewriteEntry);
+    console.log(`✅ Successfully fetched ${rewriteRules.length} rewrites`);
+  } catch (error) {
+    console.warn(
+      `⚠️ Could not fetch rewrites from "${rewriteCT}":`,
+      error.message
+    );
+  }
+
+  return { redirectRules, rewriteRules };
 }
