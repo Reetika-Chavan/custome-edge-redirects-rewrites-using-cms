@@ -1,13 +1,7 @@
 /**
  * Fetch redirect/rewrite rules from Contentstack
- * Used during build time to generate Edge redirects/rewrites
+ * Uses Contentstack REST API directly for reliability
  */
-
-import { createRequire } from "module";
-const require = createRequire(import.meta.url);
-
-// Use require for contentstack since it's a CommonJS module
-const contentstack = require("contentstack");
 
 async function fetchEntries(contentType) {
   const apiKey =
@@ -25,7 +19,8 @@ async function fetchEntries(contentType) {
 
   const host =
     process.env.CONTENTSTACK_APP_HOST ||
-    process.env.NEXT_PUBLIC_CONTENTSTACK_APP_HOST;
+    process.env.NEXT_PUBLIC_CONTENTSTACK_APP_HOST ||
+    "cdn.contentstack.io";
 
   if (!apiKey || !deliveryToken) {
     throw new Error(
@@ -38,35 +33,36 @@ async function fetchEntries(contentType) {
    - API Key: ✓
    - Delivery Token: ✓
    - Environment: ${environment}
-   - Host: ${host || "default (cdn.contentstack.io)"}`
+   - Host: ${host}`
   );
 
   try {
-    // Initialize Stack using the contentstack instance
-    const Stack = contentstack.Stack({
-      api_key: apiKey,
-      delivery_token: deliveryToken,
-      environment,
+    // Use Contentstack REST API directly
+    const url = `https://${host}/v3/content_types/${contentType}/entries?environment=${environment}`;
+
+    console.log(`   - Fetching from: ${url}`);
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        api_key: apiKey,
+        access_token: deliveryToken,
+        "Content-Type": "application/json",
+      },
     });
 
-    if (host) {
-      Stack.setHost(host);
-      console.log(`   - Using custom host: ${host}`);
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(
+        `API request failed: ${response.status} ${response.statusText} - ${errorText}`
+      );
     }
 
-    const Query = Stack.ContentType(contentType).Query();
-    const result = await Query.find();
-
-    if (Array.isArray(result)) return result;
-    if (result?.items) return result.items;
-    if (Array.isArray(result?.[0])) return result[0];
-
-    return [];
+    const data = await response.json();
+    return data.entries || [];
   } catch (error) {
     console.error(`❌ Failed to fetch entries from "${contentType}"`, {
       message: error.message,
-      code: error.error_code,
-      status: error.status,
     });
     throw error;
   }
