@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@contentstack/live-preview-utils": "^4.1.1",
+    "baseline-browser-mapping": "^2.9.14",
     "contentstack": "^3.26.2",
     "next": "16.0.1",
     "react": "19.2.0",
