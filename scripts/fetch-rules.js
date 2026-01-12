@@ -15,7 +15,7 @@ async function fetchEntries(contentType) {
   const environment =
     process.env.CONTENTSTACK_ENVIRONMENT ||
     process.env.NEXT_PUBLIC_CONTENTSTACK_ENVIRONMENT ||
-    "development";
+    "devlopment";
 
   const host =
     process.env.CONTENTSTACK_APP_HOST ||
