@@ -107,9 +107,22 @@ export default async function handler(request) {
     });
   }
 
-  // No match found - return undefined to pass through to origin
-  // This is the Contentstack Launch pattern for forwarding to Next.js
-  return;
+  // No match found - pass through to origin
+  // Create a clean request to avoid RSC header issues
+  const cleanHeaders = new Headers();
+  request.headers.forEach((value, key) => {
+    // Skip RSC-related headers that can cause issues
+    if (!key.toLowerCase().startsWith('rsc') && 
+        !key.toLowerCase().startsWith('next-router')) {
+      cleanHeaders.set(key, value);
+    }
+  });
+
+  return fetch(request.url, {
+    method: request.method,
+    headers: cleanHeaders,
+    body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined,
+  });
 }
 
 // Simple pattern matching (supports * wildcard)
