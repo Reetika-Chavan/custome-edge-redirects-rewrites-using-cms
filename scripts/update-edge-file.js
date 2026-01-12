@@ -107,8 +107,9 @@ export default async function handler(request) {
     });
   }
 
-  // No match found, forward request to origin (Contentstack Launch pattern)
-  return fetch(request);
+  // No match found - return undefined to pass through to origin
+  // This is the Contentstack Launch pattern for forwarding to Next.js
+  return;
 }
 
 // Simple pattern matching (supports * wildcard)
