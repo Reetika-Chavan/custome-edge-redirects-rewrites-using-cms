@@ -19,6 +19,11 @@ async function fetchEntries(contentType) {
     process.env.CONTENTSTACK_ENVIRONMENT ||
     process.env.NEXT_PUBLIC_CONTENTSTACK_ENVIRONMENT ||
     "development";
+  const host =
+    process.env.CONTENTSTACK_APP_HOST ||
+    process.env.NEXT_PUBLIC_CONTENTSTACK_APP_HOST ||
+    process.env.CONTENTSTACK_LIVE_PREVIEW_HOST ||
+    process.env.NEXT_PUBLIC_CONTENTSTACK_LIVE_PREVIEW_HOST;
 
   if (!apiKey || !deliveryToken) {
     const missing = [];
@@ -38,12 +43,40 @@ async function fetchEntries(contentType) {
   }
 
   // Log configuration status (without exposing secrets)
+  const apiKeySource = process.env.CONTENTSTACK_API_KEY
+    ? "CONTENTSTACK_API_KEY"
+    : "NEXT_PUBLIC_CONTENTSTACK_API_KEY";
+  const tokenSource = process.env.CONTENTSTACK_DELIVERY_TOKEN
+    ? "CONTENTSTACK_DELIVERY_TOKEN"
+    : process.env.NEXT_PUBLIC_CONTENTSTACK_DELIVERY_TOKEN
+    ? "NEXT_PUBLIC_CONTENTSTACK_DELIVERY_TOKEN"
+    : process.env.CONTENTSTACK_MANAGEMENT_TOKEN
+    ? "CONTENTSTACK_MANAGEMENT_TOKEN"
+    : "NEXT_PUBLIC_CONTENTSTACK_MANAGEMENT_TOKEN";
+  const envSource = process.env.CONTENTSTACK_ENVIRONMENT
+    ? "CONTENTSTACK_ENVIRONMENT"
+    : process.env.NEXT_PUBLIC_CONTENTSTACK_ENVIRONMENT
+    ? "NEXT_PUBLIC_CONTENTSTACK_ENVIRONMENT"
+    : "default (development)";
+
+  const hostSource = process.env.CONTENTSTACK_APP_HOST
+    ? "CONTENTSTACK_APP_HOST"
+    : process.env.NEXT_PUBLIC_CONTENTSTACK_APP_HOST
+    ? "NEXT_PUBLIC_CONTENTSTACK_APP_HOST"
+    : process.env.CONTENTSTACK_LIVE_PREVIEW_HOST
+    ? "CONTENTSTACK_LIVE_PREVIEW_HOST"
+    : process.env.NEXT_PUBLIC_CONTENTSTACK_LIVE_PREVIEW_HOST
+    ? "NEXT_PUBLIC_CONTENTSTACK_LIVE_PREVIEW_HOST"
+    : "default (cdn.contentstack.io)";
+
   console.log(
-    `📋 Contentstack configuration: API Key: ${
-      apiKey ? "✓" : "✗"
-    }, Delivery Token: ${
-      deliveryToken ? "✓" : "✗"
-    }, Environment: ${environment}`
+    `📋 Contentstack configuration:\n` +
+      `   - API Key: ${apiKey ? "✓" : "✗"} (from ${apiKeySource})\n` +
+      `   - Delivery Token: ${
+        deliveryToken ? "✓" : "✗"
+      } (from ${tokenSource})\n` +
+      `   - Environment: ${environment} (from ${envSource})\n` +
+      `   - Host: ${host || "default"} (from ${hostSource})`
   );
 
   try {
@@ -76,11 +109,52 @@ async function fetchEntries(contentType) {
       environment: environment,
     });
 
+    // Set custom host if provided (for non-production environments)
+    if (host) {
+      Stack.setHost(host);
+      console.log(`   - Using custom host: ${host}`);
+    }
+
     const Query = Stack.ContentType(contentType).Query();
-    const result = await Query.toJSON().find();
-    return result[0] || [];
+    const result = await Query.find();
+
+    // Contentstack returns { items: [...], count: ... } or just an array
+    // Handle both cases
+    if (Array.isArray(result)) {
+      return result;
+    } else if (result && Array.isArray(result.items)) {
+      return result.items;
+    } else if (result && Array.isArray(result[0])) {
+      return result[0];
+    }
+
+    return [];
   } catch (error) {
-    console.error(`❌ Error fetching entries from "${contentType}":`, error);
+    // Enhanced error logging
+    const errorDetails = {
+      error_message: error.error_message || error.message,
+      error_code: error.error_code,
+      errors: error.errors,
+      status: error.status,
+      statusText: error.statusText,
+    };
+
+    console.error(
+      `❌ Error fetching entries from "${contentType}":`,
+      errorDetails
+    );
+
+    // Provide helpful troubleshooting info
+    if (error.error_code === 109 || error.status === 412) {
+      console.error(
+        `💡 Troubleshooting: This error usually means:\n` +
+          `   - The API key doesn't match any Contentstack stack\n` +
+          `   - The environment "${environment}" doesn't exist in your stack\n` +
+          `   - The delivery token doesn't have access to this environment\n` +
+          `   - Check that your environment variables are set correctly in your deployment platform`
+      );
+    }
+
     throw error;
   }
 }
