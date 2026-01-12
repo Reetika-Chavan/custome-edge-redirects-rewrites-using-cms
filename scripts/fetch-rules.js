@@ -36,9 +36,42 @@ async function fetchEntries(contentType) {
   );
 
   try {
-    const { default: Contentstack } = await import("contentstack");
+    // Import Contentstack SDK - use dynamic import
+    // The module exports Stack, but the structure depends on how it's imported
+    const contentstackModule = await import("contentstack");
 
-    const Stack = new Contentstack.Stack({
+    // Try to find Stack in different locations
+    // Pattern 1: contentstackModule.Stack (named export)
+    // Pattern 2: contentstackModule.default.Stack (default export has Stack)
+    // Pattern 3: contentstackModule.default is Stack itself
+    let StackFn;
+
+    if (contentstackModule.Stack) {
+      StackFn = contentstackModule.Stack;
+    } else if (contentstackModule.default?.Stack) {
+      StackFn = contentstackModule.default.Stack;
+    } else if (
+      contentstackModule.default &&
+      typeof contentstackModule.default === "object"
+    ) {
+      // If default is an object, check if it has Stack
+      StackFn = contentstackModule.default.Stack;
+    }
+
+    if (!StackFn || typeof StackFn !== "function") {
+      const availableKeys = Object.keys(contentstackModule);
+      const defaultKeys = contentstackModule.default
+        ? Object.keys(contentstackModule.default)
+        : [];
+      throw new Error(
+        `Contentstack.Stack not found as a function. ` +
+          `Module keys: ${availableKeys.join(", ")}. ` +
+          `Default keys: ${defaultKeys.join(", ")}`
+      );
+    }
+
+    // Call Stack as a function (not constructor) - matches lib/contentstack.ts pattern
+    const Stack = StackFn({
       api_key: apiKey,
       delivery_token: deliveryToken,
       environment,
