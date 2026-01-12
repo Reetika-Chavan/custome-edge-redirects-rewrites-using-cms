@@ -81,21 +81,14 @@ async function fetchEntries(contentType) {
 
   try {
     if (!contentstack) {
-      // Import Contentstack SDK - match the pattern from lib/contentstack.ts
-      // Use import * as to match the working pattern
+      // Import Contentstack SDK - match the exact pattern from lib/contentstack.ts
+      // Use import * as contentstack to match the working pattern
       const contentstackModule = await import("contentstack");
-      // Handle both ESM and CJS export patterns
-      if (contentstackModule.default && contentstackModule.default.Stack) {
-        contentstack = contentstackModule.default;
-      } else {
-        contentstack = contentstackModule;
-      }
+      contentstack = contentstackModule;
     }
 
-    // Access Stack function - should be available as contentstack.Stack
-    const StackFn = contentstack.Stack;
-
-    if (!StackFn) {
+    // Access Stack - match lib/contentstack.ts pattern: contentstack.Stack({...})
+    if (!contentstack.Stack) {
       throw new Error(
         `Contentstack.Stack is not available. Module structure: ${JSON.stringify(
           Object.keys(contentstack)
@@ -104,31 +97,28 @@ async function fetchEntries(contentType) {
     }
 
     // Use Contentstack SDK to create Stack instance
-    // Try calling as function first, if that fails try as constructor
+    // Match the exact pattern from lib/contentstack.ts: contentstack.Stack({...})
+    // Wrap in try-catch to handle "Cannot call a class as a function" error
     let Stack;
+    const stackConfig = {
+      api_key: apiKey,
+      delivery_token: deliveryToken,
+      environment: environment,
+    };
+
     try {
-      if (typeof StackFn === "function") {
-        Stack = StackFn({
-          api_key: apiKey,
-          delivery_token: deliveryToken,
-          environment: environment,
-        });
-      } else {
-        throw new Error("StackFn is not a function");
-      }
-    } catch (initError) {
-      // If calling as function fails, try as constructor
+      // Try calling as function first (matches lib/contentstack.ts)
+      Stack = contentstack.Stack(stackConfig);
+    } catch (stackError) {
+      // If it's a class, use constructor pattern
       if (
-        initError.message?.includes("class") ||
-        initError.message?.includes("Cannot call")
+        stackError.message?.includes("class") ||
+        stackError.message?.includes("Cannot call a class as a function")
       ) {
-        Stack = new StackFn({
-          api_key: apiKey,
-          delivery_token: deliveryToken,
-          environment: environment,
-        });
+        Stack = new contentstack.Stack(stackConfig);
       } else {
-        throw initError;
+        // Re-throw if it's a different error
+        throw stackError;
       }
     }
 
